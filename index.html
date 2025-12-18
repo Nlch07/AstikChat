@@ -560,6 +560,13 @@
     <button onclick="start()">Войти в чат</button>
   </div>
 
+  <div id="install-banner" style="display: none; background: #fff; padding: 15px; position: fixed; bottom: 0; width: 100%; z-index: 9999; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); text-align: center;">
+  <p>Установите AstikChat на рабочий стол!</p>
+  <button id="install-button" style="background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin-top: 10px; font-weight: bold;">Установить</button>
+  <button id="close-banner" style="background: #e5e7eb; border: none; padding: 10px 20px; border-radius: 8px; margin-left: 10px;">Позже</button>
+</div>
+
+  
   <!-- Главный экран -->
   <div id="main">
     <header>
@@ -597,6 +604,38 @@
 
 <!-- ОБНОВЛЕННЫЙ СКРИПТ С ПРОВЕРКОЙ ИМЕН -->
 <script>
+  let deferredPrompt;
+const installBanner = document.getElementById('install-banner');
+const installButton = document.getElementById('install-button');
+
+// Слушаем событие готовности к установке
+window.addEventListener('beforeinstallprompt', (e) => {
+  // Предотвращаем стандартное появление окна Chrome
+  e.preventDefault();
+  // Сохраняем событие, чтобы вызвать его позже
+  deferredPrompt = e;
+  // Показываем наш кастомный баннер
+  installBanner.style.display = 'block';
+});
+
+installButton.addEventListener('click', async () => {
+  if (deferredPrompt) {
+    // Показываем окно установки
+    deferredPrompt.prompt();
+    // Ждем ответа пользователя
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`Результат установки: ${outcome}`);
+    // Скрываем баннер, так как событие можно использовать только один раз
+    deferredPrompt = null;
+    installBanner.style.display = 'none';
+  }
+});
+
+// Закрытие баннера
+document.getElementById('close-banner').addEventListener('click', () => {
+  installBanner.style.display = 'none';
+});
+  
 const firebaseConfig = {
   apiKey: "AIzaSyCysKcXFVoqWDIQzkdObB-9sgm54cRGyp0",
   authDomain: "test3-88cee.firebaseapp.com",
@@ -880,5 +919,6 @@ document.getElementById('msg-input').addEventListener('keypress', e => {
     </script>
 </body>
 </html>
+
 
 
