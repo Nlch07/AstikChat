@@ -790,7 +790,20 @@ function back() {
   document.getElementById('main').style.display = 'flex';
   loadChats();
 }
+  
+// Запрос разрешения на уведомления при входе
+function requestNotificationPermission() {
+  if (!("Notification" in window)) return;
+  
+  Notification.requestPermission().then(permission => {
+    if (permission === "granted") {
+      console.log("Уведомления разрешены!");
+    }
+  });
+}
 
+// Вызови это внутри функции start()
+  
 function loadChats() {
   const container = document.getElementById('chat-list');
   container.innerHTML = `<div class="chat-item" onclick="openPublic()">
@@ -864,3 +877,4 @@ document.getElementById('msg-input').addEventListener('keypress', e => {
     </script>
 </body>
 </html>
+
