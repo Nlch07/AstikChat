@@ -552,13 +552,18 @@
 <body>
 
 <div id="app">
-  <!-- Приветствие -->
-  <div id="welcome">
-    <h1>AstikChat</h1>
-    <p>Введите ваше имя для начала общения вас так будут видеть другие пользователи</p>
-    <input type="text" id="nameInput" placeholder="Ваше имя в чате" maxlength="18">
-    <button onclick="start()">Войти в чат</button>
+
+<div id="welcome">
+  <h1>AstikChat</h1>
+  <p id="welcome-text">Войдите через Google, чтобы продолжить</p>
+  
+  <button id="google-btn" onclick="login()">Войти через Google</button>
+
+  <div id="nick-setup" style="display: none; width: 100%;">
+    <input type="text" id="nameInput" placeholder="Придумайте уникальный ник" maxlength="15">
+    <button onclick="saveNickname()">Начать общаться</button>
   </div>
+</div>
 
   <div id="install-banner" style="display: none; background: #fff; padding: 15px; position: fixed; bottom: 0; width: 100%; z-index: 9999; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); text-align: center;">
   <p>Установите AstikChat на рабочий стол!</p>
@@ -604,38 +609,7 @@
 
 <!-- ОБНОВЛЕННЫЙ СКРИПТ С ПРОВЕРКОЙ ИМЕН -->
 <script>
-  let deferredPrompt;
-const installBanner = document.getElementById('install-banner');
-const installButton = document.getElementById('install-button');
-
-// Слушаем событие готовности к установке
-window.addEventListener('beforeinstallprompt', (e) => {
-  // Предотвращаем стандартное появление окна Chrome
-  e.preventDefault();
-  // Сохраняем событие, чтобы вызвать его позже
-  deferredPrompt = e;
-  // Показываем наш кастомный баннер
-  installBanner.style.display = 'block';
-});
-
-installButton.addEventListener('click', async () => {
-  if (deferredPrompt) {
-    // Показываем окно установки
-    deferredPrompt.prompt();
-    // Ждем ответа пользователя
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`Результат установки: ${outcome}`);
-    // Скрываем баннер, так как событие можно использовать только один раз
-    deferredPrompt = null;
-    installBanner.style.display = 'none';
-  }
-});
-
-// Закрытие баннера
-document.getElementById('close-banner').addEventListener('click', () => {
-  installBanner.style.display = 'none';
-});
-  
+  // Конфигурация остается твоя
 const firebaseConfig = {
   apiKey: "AIzaSyCysKcXFVoqWDIQzkdObB-9sgm54cRGyp0",
   authDomain: "test3-88cee.firebaseapp.com",
@@ -645,293 +619,226 @@ const firebaseConfig = {
   messagingSenderId: "469479851370",
   appId: "1:469479851370:web:915e95767b012c281e1113"
 };
+
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+const auth = firebase.auth();
+const provider = new firebase.auth.GoogleAuthProvider();
 
-let myName = localStorage.getItem('astik_name') || '';
+let myName = ""; // Это будет наш никнейм
+let myUid = "";
 let currentChatId = null;
-let currentPartner = null;
+let replyTo = null;
 
-if (myName) start();
-
-// Функция проверки, занято ли имя
-function checkNameExists(name) {
-  return db.ref('users/' + name.toLowerCase()).once('value').then(snap => {
-    return snap.exists();
-  });
-}
-
-// Регистрация имени в базе
-function registerUser(name) {
-  db.ref('users/' + name.toLowerCase()).set({
-    name: name,
-    online: true,
-    lastSeen: Date.now()
-  });
-}
-
-// Удаление имени при выходе
-function unregisterUser() {
-  if (myName) {
-    db.ref('users/' + myName.toLowerCase()).remove();
-  }
-}
-
-// Проверка имени при входе
-function start() {
-  if (!myName) {
-    const inputName = (document.getElementById('nameInput').value || 'Гость').trim();
-    if (!inputName) return alert('Введите имя!');
-    
-    // Проверяем, занято ли имя (без учета регистра)
-    checkNameExists(inputName.toLowerCase()).then(exists => {
-      if (exists) {
-        alert('⚠️ Это имя уже занято. Пожалуйста, выберите другое имя.');
-        return;
-      }
-      
-      // Если имя свободно - сохраняем
-      myName = inputName;
-      localStorage.setItem('astik_name', myName);
-      registerUser(myName);
-      
-      // Загружаем чаты
-      document.getElementById('welcome').remove();
-      document.getElementById('main').style.display = 'flex';
-      loadChats();
+// 1. ВХОД ЧЕРЕЗ GOOGLE
+function login() {
+    // Используем Redirect вместо Popup
+    auth.signInWithRedirect(provider).catch((error) => {
+        console.error("Ошибка входа:", error);
+        alert("Код ошибки: " + error.code + "\nСообщение: " + error.message);
     });
-  } else {
-    // Если имя уже было сохранено в localStorage
-    document.getElementById('welcome').remove();
+}
+
+// Добавь этот блок, чтобы после редиректа Firebase завершил вход
+auth.getRedirectResult().then((result) => {
+    if (result.user) {
+        console.log("Вход выполнен успешно через Redirect");
+        // Логика перехода в чат уже есть в onAuthStateChanged
+    }
+}).catch((error) => {
+    if (error.code === 'auth/operation-not-supported-in-this-environment') {
+        alert("Этот браузер не поддерживает вход через Google. Попробуйте Chrome или Safari.");
+    } else {
+        console.error("Ошибка результата редиректа:", error);
+    }
+});
+
+// 2. ПРОВЕРКА СОСТОЯНИЯ ВХОДА
+auth.onAuthStateChanged((user) => {
+    if (user) {
+        myUid = user.uid;
+        checkUserNickname(user.uid);
+    } else {
+        showWelcomeStep(1);
+    }
+});
+
+// 3. ПРОВЕРКА: ЕСТЬ ЛИ УЖЕ НИК У ЭТОГО UID
+function checkUserNickname(uid) {
+    db.ref('users_by_uid/' + uid).once('value', (snap) => {
+        if (snap.exists()) {
+            myName = snap.val().nickname;
+            enterChat();
+        } else {
+            showWelcomeStep(2); // Если ника нет, просим создать
+        }
+    });
+}
+
+// 4. СОХРАНЕНИЕ НИКА
+async function saveNickname() {
+    const input = document.getElementById('nameInput');
+    const nick = input.value.trim().toLowerCase();
+    
+    if (nick.length < 3) return alert("Ник слишком короткий!");
+
+    // Проверяем, не занят ли ник другим человеком
+    const existingNick = await db.ref('nicknames/' + nick).once('value');
+    if (existingNick.exists()) {
+        return alert("Этот ник уже занят, придумай другой!");
+    }
+
+    // Сохраняем связку UID -> Nick и Nick -> UID
+    const updates = {};
+    updates['users_by_uid/' + myUid] = { nickname: nick, photo: auth.currentUser.photoURL };
+    updates['nicknames/' + nick] = myUid;
+    
+    await db.ref().update(updates);
+    myName = nick;
+    enterChat();
+}
+
+// 5. ЛОГИКА ИНТЕРФЕЙСА ПРИ ВХОДЕ
+function showWelcomeStep(step) {
+    const googleBtn = document.getElementById('google-btn');
+    const nickSetup = document.getElementById('nick-setup');
+    const welcomeText = document.getElementById('welcome-text');
+
+    if (step === 1) {
+        googleBtn.style.display = 'block';
+        nickSetup.style.display = 'none';
+    } else {
+        googleBtn.style.display = 'none';
+        nickSetup.style.display = 'block';
+        welcomeText.innerText = "Почти готово! Выберите себе имя для чата:";
+    }
+}
+
+function enterChat() {
+    document.getElementById('welcome').style.display = 'none';
     document.getElementById('main').style.display = 'flex';
     loadChats();
-  }
 }
 
-// Проверка имени при смене
-function changeName() {
-  const newName = prompt('Новое имя:', myName);
-  if (!newName || !newName.trim()) return;
-  
-  const trimmedName = newName.trim();
-  if (trimmedName.toLowerCase() === myName.toLowerCase()) {
-    return alert('Это ваше текущее имя!');
-  }
-  
-  // Проверяем, занято ли новое имя
-  checkNameExists(trimmedName.toLowerCase()).then(exists => {
-    if (exists) {
-      alert('⚠️ Это имя уже занято. Пожалуйста, выберите другое имя.');
-      return;
+// 6. ОТВЕТ НА СООБЩЕНИЕ (Double Click)
+function setReply(name, text) {
+    replyTo = { name, text };
+    const input = document.getElementById('msg-input');
+    input.placeholder = `Ответ пользователю ${name}...`;
+    input.focus();
+}
+
+// 7. ОТПРАВКА
+function sendMessage() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const msg = {
+        name: myName,
+        uid: myUid,
+        text: text,
+        time: Date.now()
+    };
+    if (replyTo) msg.reply = replyTo;
+
+    if (currentChatId === 'public') {
+        db.ref('public_messages').push(msg);
+    } else {
+        db.ref(`private_chats/${currentChatId}/messages`).push(msg);
+        db.ref(`private_chats/${currentChatId}`).update({
+            lastMsg: text.substring(0, 40),
+            lastTime: Date.now()
+        });
     }
-    
-    // Удаляем старое имя из базы
-    db.ref('users/' + myName.toLowerCase()).remove();
-    
-    // Сохраняем новое
-    myName = trimmedName;
-    localStorage.setItem('astik_name', myName);
-    registerUser(myName);
-    
-    alert('Имя успешно изменено!');
-    loadChats();
-  });
+
+    input.value = '';
+    input.placeholder = "Напишите сообщение...";
+    replyTo = null;
 }
 
-function chatId(a, b) {
-  return [a.toLowerCase(), b.toLowerCase()].sort().join('_');
+// 8. ЗАГРУЗКА СООБЩЕНИЙ
+function listenToMessages(path) {
+    const container = document.getElementById('chat-messages');
+    container.innerHTML = '';
+    db.ref(path).off(); // Сброс старых слушателей
+    db.ref(path).limitToLast(50).on('child_added', s => {
+        const m = s.val();
+        const isMe = m.uid === myUid;
+        const div = document.createElement('div');
+        div.className = `message ${isMe ? 'sent' : 'received'}`;
+        
+        div.ondblclick = () => setReply(m.name, m.text);
+
+        let replyHtml = m.reply ? `
+            <div style="background: rgba(0,0,0,0.08); padding: 5px 8px; border-left: 3px solid #3b82f6; font-size: 12px; margin-bottom: 5px; border-radius: 4px; color: inherit;">
+                <strong>${m.reply.name}</strong><br>${m.reply.text}
+            </div>` : '';
+
+        div.innerHTML = `
+            ${replyHtml}
+            <div class="msg-sender" style="${isMe ? 'display:none' : ''}">${m.name}</div>
+            <div class="msg-text">${m.text}</div>
+            <div class="msg-time">${new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+        `;
+        container.appendChild(div);
+        div.scrollIntoView({behavior: 'smooth'});
+    });
 }
 
-function newPrivate() {
-  const nick = prompt('С кем начать чат?\nВведите ник:').trim();
-  if (!nick) return alert('Введите имя пользователя!');
-  if (nick.toLowerCase() === myName.toLowerCase()) return alert('Нельзя начать чат с самим собой!');
-  
-  // Проверяем, существует ли такой пользователь
-  checkNameExists(nick.toLowerCase()).then(exists => {
-    if (!exists) {
-      alert('Пользователь с таким именем не найден.');
-      return;
-    }
-    
-    openChat(nick);
-  });
+// 9. СПИСОК ЧАТОВ (Только те, где вы уже общались)
+function loadChats() {
+    const container = document.getElementById('chat-list');
+    container.innerHTML = `
+        <div class="chat-item" onclick="openPublic()">
+            <div class="avatar">🌐</div>
+            <div class="info"><div class="chat-name">Общий чат</div><div class="last-msg">Все пользователи</div></div>
+        </div>`;
+
+    db.ref('private_chats').on('value', snap => {
+        container.querySelectorAll('.private').forEach(el => el.remove());
+        snap.forEach(child => {
+            const id = child.key;
+            if (id.includes(myUid)) {
+                const data = child.val();
+                const item = document.createElement('div');
+                item.className = 'chat-item private';
+                item.innerHTML = `
+                    <div class="avatar">💬</div>
+                    <div class="info">
+                        <div class="chat-name">Приватный чат</div>
+                        <div class="last-msg">${data.lastMsg || ''}</div>
+                    </div>`;
+                item.onclick = () => {
+                    currentChatId = id;
+                    showChatScreen('Приватный чат', '💬');
+                    listenToMessages(`private_chats/${id}/messages`);
+                };
+                container.appendChild(item);
+            }
+        });
+    });
 }
 
 function openPublic() {
-  currentChatId = 'public';
-  currentPartner = null;
-  showChatScreen('Общий чат', '🌐');
-  listenToMessages('public_messages');
-}
-
-function openChat(partner) {
-  currentChatId = chatId(myName, partner);
-  currentPartner = partner;
-  showChatScreen(partner, partner[0].toUpperCase());
-  listenToMessages(`private_chats/${currentChatId}/messages`);
-  markAsRead();
+    currentChatId = 'public';
+    showChatScreen('Общий чат', '🌐');
+    listenToMessages('public_messages');
 }
 
 function showChatScreen(title, avatar) {
-  document.getElementById('main').style.display = 'none';
-  document.getElementById('chat-screen').style.display = 'flex';
-  document.getElementById('partner-name').textContent = title;
-  document.getElementById('partner-avatar').textContent = avatar;
-  document.getElementById('chat-messages').innerHTML = '';
-}
-
-function listenToMessages(path) {
-  db.ref(path).limitToLast(200).on('child_added', s => {
-    const m = s.val();
-    const isMe = m.name === myName;
-    const div = document.createElement('div');
-    div.className = `message ${isMe ? 'sent' : 'received'}`;
-    
-    // Для общего чата показываем отправителя, для приватных скрываем
-    const showSender = (currentChatId === 'public' && !isMe);
-    
-    div.innerHTML = `
-      ${showSender ? `<div class="msg-sender">${m.name}</div>` : ''}
-      <div class="msg-text">${m.text}</div>
-      <div class="msg-time">${new Date(m.time).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'})}</div>
-    `;
-    document.getElementById('chat-messages').appendChild(div);
-    div.scrollIntoView({behavior:'smooth'});
-  });
-}
-
-function sendMessage() {
-  const input = document.getElementById('msg-input');
-  const text = input.value.trim();
-  if (!text) return;
-  const msg = { name: myName, text, time: Date.now() };
-
-  if (currentChatId === 'public') {
-    db.ref('public_messages').push(msg);
-  } else {
-    const path = `private_chats/${currentChatId}/messages`;
-    db.ref(path).push(msg);
-    db.ref(`private_chats/${currentChatId}`).update({
-      lastMsg: text.substring(0,40)+(text.length>40?'...':''),
-      lastTime: Date.now(),
-      [`unread/${currentPartner.toLowerCase()}`]: firebase.database.ServerValue.increment(1)
-    });
-  }
-  input.value = '';
-}
-
-function markAsRead() {
-  if (currentChatId !== 'public') {
-    db.ref(`private_chats/${currentChatId}/unread/${myName.toLowerCase()}`).set(0);
-  }
+    document.getElementById('main').style.display = 'none';
+    document.getElementById('chat-screen').style.display = 'flex';
+    document.getElementById('partner-name').innerText = title;
+    document.getElementById('partner-avatar').innerText = avatar;
 }
 
 function back() {
-  document.getElementById('chat-screen').style.display = 'none';
-  document.getElementById('main').style.display = 'flex';
-  loadChats();
-}
-  
-// Запрос разрешения на уведомления при входе
-function requestNotificationPermission() {
-  if (!("Notification" in window)) return;
-  
-  Notification.requestPermission().then(permission => {
-    if (permission === "granted") {
-      console.log("Уведомления разрешены!");
-    }
-  });
+    document.getElementById('chat-screen').style.display = 'none';
+    document.getElementById('main').style.display = 'flex';
 }
 
-// Вызови это внутри функции start()
-  
-function loadChats() {
-  const container = document.getElementById('chat-list');
-  // Очищаем и добавляем только Общий чат в начало
-  container.innerHTML = `
-    <div class="chat-item" onclick="openPublic()">
-      <div class="avatar">🌐</div>
-      <div class="info">
-        <div class="chat-name">Общий чат</div>
-        <div class="last-msg">Общайтесь со всеми участниками</div>
-      </div>
-    </div>`;
-
-  // Слушаем изменения в приватных чатах
-  db.ref('private_chats').on('value', snap => {
-    // Удаляем все старые приватные чаты перед перерисовкой
-    const existing = container.querySelectorAll('.private');
-    existing.forEach(el => el.remove());
-
-    const chats = [];
-    const myLowerName = myName.toLowerCase();
-
-    snap.forEach(child => {
-      const id = child.key;
-      const participants = id.split('_');
-
-      // ПРОВЕРКА: Показываем чат только если наше имя есть в ID комнаты
-      if (participants.includes(myLowerName)) {
-        const data = child.val();
-        // Находим имя партнера (тот, кто не я)
-        const partnerName = participants.find(u => u !== myLowerName);
-        
-        if (partnerName) {
-          const unread = (data.unread && data.unread[myLowerName]) || 0;
-          chats.push({
-            partner: partnerName,
-            // Используем время последнего сообщения для сортировки
-            lastTime: data.lastTime || 0,
-            lastMsg: data.lastMsg || 'Сообщений нет',
-            unread: unread,
-            id: id
-          });
-        }
-      }
-    });
-
-    // СОРТИРОВКА: Сначала те, кто писал последним (по убыванию времени)
-    chats.sort((a, b) => b.lastTime - a.lastTime);
-
-    // Отрисовка чатов
-    chats.forEach(chat => {
-      const item = document.createElement('div');
-      item.className = 'chat-item private';
-      item.onclick = () => openChat(chat.partner);
-      
-      // Ищем имя партнера с правильным регистром (по желанию можно доработать базу)
-      // Здесь для простоты берем первую букву в верхний регистр
-      const displayName = chat.partner.charAt(0).toUpperCase() + chat.partner.slice(1);
-
-      item.innerHTML = `
-        <div class="avatar">${displayName[0]}</div>
-        <div class="info">
-          <div class="chat-name">${displayName}</div>
-          <div class="last-msg">${chat.lastMsg}</div>
-        </div>
-        ${chat.unread > 0 ? `<div class="unread">${chat.unread}</div>` : ''}
-      `;
-      container.appendChild(item);
-    });
-  });
-}
-// Удаляем имя при закрытии страницы
-window.addEventListener('beforeunload', function() {
-  unregisterUser();
-});
-
-// Send button
 document.getElementById('send-btn').onclick = sendMessage;
-document.getElementById('msg-input').addEventListener('keypress', e => {
-  if (e.key === 'Enter') sendMessage();
-});
-</script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js')
-          .then(() => console.log("PWA готово!"));
-      }
     </script>
 </body>
 </html>
