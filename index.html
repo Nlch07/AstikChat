@@ -848,49 +848,66 @@ function requestNotificationPermission() {
   
 function loadChats() {
   const container = document.getElementById('chat-list');
-  container.innerHTML = `<div class="chat-item" onclick="openPublic()">
-    <div class="avatar">🌐</div>
-    <div class="info">
-      <div class="chat-name">Общий чат</div>
-      <div class="last-msg">Общайтесь со всеми участниками</div>
-    </div>
-  </div>`;
+  // Очищаем и добавляем только Общий чат в начало
+  container.innerHTML = `
+    <div class="chat-item" onclick="openPublic()">
+      <div class="avatar">🌐</div>
+      <div class="info">
+        <div class="chat-name">Общий чат</div>
+        <div class="last-msg">Общайтесь со всеми участниками</div>
+      </div>
+    </div>`;
 
-  db.ref('private_chats').orderByChild('lastTime').on('value', snap => {
+  // Слушаем изменения в приватных чатах
+  db.ref('private_chats').on('value', snap => {
+    // Удаляем все старые приватные чаты перед перерисовкой
     const existing = container.querySelectorAll('.private');
     existing.forEach(el => el.remove());
 
-    // Собираем все чаты в массив
     const chats = [];
-    
+    const myLowerName = myName.toLowerCase();
+
     snap.forEach(child => {
-      const data = child.val();
       const id = child.key;
-      const partner = id.split('_').find(u => u.toLowerCase() !== myName.toLowerCase());
-      if (partner) {
-        const unread = (data.unread && data.unread[myName.toLowerCase()]) || 0;
-        chats.push({
-          partner,
-          lastTime: data.lastTime || 0,
-          lastMsg: data.lastMsg || 'Начните чат',
-          unread,
-          id
-        });
+      const participants = id.split('_');
+
+      // ПРОВЕРКА: Показываем чат только если наше имя есть в ID комнаты
+      if (participants.includes(myLowerName)) {
+        const data = child.val();
+        // Находим имя партнера (тот, кто не я)
+        const partnerName = participants.find(u => u !== myLowerName);
+        
+        if (partnerName) {
+          const unread = (data.unread && data.unread[myLowerName]) || 0;
+          chats.push({
+            partner: partnerName,
+            // Используем время последнего сообщения для сортировки
+            lastTime: data.lastTime || 0,
+            lastMsg: data.lastMsg || 'Сообщений нет',
+            unread: unread,
+            id: id
+          });
+        }
       }
     });
 
-    // Сортируем по lastTime (новые выше)
+    // СОРТИРОВКА: Сначала те, кто писал последним (по убыванию времени)
     chats.sort((a, b) => b.lastTime - a.lastTime);
 
-    // Добавляем отсортированные чаты
+    // Отрисовка чатов
     chats.forEach(chat => {
       const item = document.createElement('div');
       item.className = 'chat-item private';
       item.onclick = () => openChat(chat.partner);
+      
+      // Ищем имя партнера с правильным регистром (по желанию можно доработать базу)
+      // Здесь для простоты берем первую букву в верхний регистр
+      const displayName = chat.partner.charAt(0).toUpperCase() + chat.partner.slice(1);
+
       item.innerHTML = `
-        <div class="avatar">${chat.partner[0].toUpperCase()}</div>
+        <div class="avatar">${displayName[0]}</div>
         <div class="info">
-          <div class="chat-name">${chat.partner}</div>
+          <div class="chat-name">${displayName}</div>
           <div class="last-msg">${chat.lastMsg}</div>
         </div>
         ${chat.unread > 0 ? `<div class="unread">${chat.unread}</div>` : ''}
@@ -899,7 +916,6 @@ function loadChats() {
     });
   });
 }
-
 // Удаляем имя при закрытии страницы
 window.addEventListener('beforeunload', function() {
   unregisterUser();
